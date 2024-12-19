@@ -1,0 +1,5 @@
+manim
+numpy
+scikit-image
+imageio
+pillow==9.5.0
