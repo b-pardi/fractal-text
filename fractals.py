@@ -326,8 +326,8 @@ if __name__ == "__main__":
             print(f"Placed {idx+1}/{num_points} fractals.")
 
     final_img = Image.fromarray((final_arr*255).astype(np.uint8), mode='L')
-    final_img.save("thin_text_with_fractals.png", dpi=(400,400))
+    final_img.save("output/thin_text_with_fractals.png", dpi=(400,400))
     print("Saved thin_text_with_fractals.png")
 
-    fractal_output_file = "fractal_lines.json"
+    fractal_output_file = "output/fractal_lines.json"
     save_fractal_lines(all_fractal_lines, fractal_output_file)

@@ -5,7 +5,7 @@ import math
 class FractalTextAnimation(Scene):
     def construct(self):
         # Load fractal lines from JSON file
-        with open("fractal_lines.json", "r") as f:
+        with open("output/fractal_lines.json", "r") as f:
             fractal_lines = json.load(f)
 
         # Define scaling factors based on image dimensions
