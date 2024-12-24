@@ -1,0 +1,22 @@
+{
+    "text": "Brandon\n\u2661\nJordyn",
+    "img_width": 9200,
+    "img_height": 5000,
+    "font_size": 1600,
+    "num_src_pts": 5600,
+    "font_path": "arial unicode ms.otf",
+
+    "fractal_type": "dragon",
+    "iters":8,
+    "iters_range": 1,
+    "order": 5,
+    "order_range": 1,
+    "steps": 12,
+    "steps_range": 2,
+
+    "animation_subgroup_size": 1000,
+    "animation_framerate": 60,
+    "animation_resolution_width": 1920,
+    "animation_resolution_height": 1080,
+    "animation_output_fname": "bj-color-simultaneous.mp4"
+}

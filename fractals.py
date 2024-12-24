@@ -15,26 +15,28 @@ def text_to_skeleton_array(text, width=300, height=100, font_path=None, font_siz
     if font_path:
         font = ImageFont.truetype(font_path, font_size)
     else:
-        font = ImageFont.load_default('arial.ttf', font_size)
+        font = ImageFont.load_default()
 
     # Split text into lines
     lines = text.split('\n')
 
     # Measure total height of text block
-    line_height = font.getsize("A")[1]
+    sample_bbox = font.getbbox("A")
+    line_height = sample_bbox[3] - sample_bbox[1]
     total_height = len(lines) * line_height
 
     # Starting y position to center vertically
-    y_offset = (height - total_height) // 2
+    y_offset = (height - total_height*1.54) // 2
 
     for line in lines:
         # Measure width of each line
-        line_width = draw.textsize(line, font=font)[0]
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_width = bbox[2] - bbox[0]
         # Center each line horizontally
         x_offset = (width - line_width) // 2
         # Draw the line
         draw.text((x_offset, y_offset*0.8), line, font=font, fill=255)
-        y_offset += line_height
+        y_offset += line_height*1.54
 
     # Convert to binary array
     arr = np.array(img)
@@ -114,45 +116,120 @@ def compute_outward_direction(binary, y, x):
 
 
 # -------- Fractal Generators --------
-def dragon_curve(iterations=10, step=5):
+def dragon_curve_partial(iterations=10, step=5):
     """
-    Generate a Dragon Curve path.
-    Axiom: FX
-    X->X+YF+
-    Y->-FX-Y
-    F-> forward
-    +-> turn left 90
-    --> turn right 90
+    Return a list of line sets, where partial_lines_per_iteration[i]
+    contains only the *newly added* lines introduced during iteration i.
+
+    Axiom: "FX"
+    X -> X+YF+
+    Y -> -FX-Y
     """
     rules = {
         'X': "X+YF+",
         'Y': "-FX-Y"
     }
     s = "FX"
-    for _ in range(iterations):
+
+    partial_lines_per_iteration = []
+    old_lines = []  # lines from the previous iteration (start empty)
+
+    for i in range(iterations):
+        # Expand string once
         new_s = []
         for c in s:
             new_s.append(rules.get(c, c))
         s = "".join(new_s)
-    # Convert to line segments
-    return string_to_lines(s, step=step, angle_increment=90)
 
-def hilbert_curve(order=4, step=5):
+        # Convert the entire string so far into line segments
+        all_lines = string_to_lines(s, step=step, angle_increment=90)
+
+        # Build sets of float-rounded line segments for easy 'difference' comparison
+        new_set = set(
+            (round(x1,2), round(y1,2), round(x2,2), round(y2,2))
+            for (x1, y1, x2, y2) in all_lines
+        )
+        old_set = set(
+            (round(x1,2), round(y1,2), round(x2,2), round(y2,2))
+            for (x1, y1, x2, y2) in old_lines
+        )
+
+        # Difference = lines that appear in iteration i but not before
+        diff_set = new_set - old_set
+
+        # Build a list of actual floating line segments corresponding to the difference
+        diff_lines = []
+        for seg in all_lines:
+            seg_rounded = (
+                round(seg[0],2), round(seg[1],2),
+                round(seg[2],2), round(seg[3],2)
+            )
+            if seg_rounded in diff_set:
+                diff_lines.append(seg)
+
+        partial_lines_per_iteration.append(diff_lines)
+
+        # Update old_lines for the next iteration
+        old_lines = all_lines
+
+    return partial_lines_per_iteration
+
+
+def hilbert_curve_partial(order=4, step=5):
     """
-    Hilbert Curve:
-    Axiom: A
-    A->+BF−AFA−FB+
-    B->−AF+BFB+FA−
+    Return a list of line sets, where partial_lines_per_iteration[i]
+    contains only the *newly added* lines introduced during iteration i.
+
+    Axiom: "A"
+    Rules:
+      A -> +BF-AFA-FB+
+      B -> -AF+BFB+FA-
     """
     rules = {
         'A': "+BF-AFA-FB+",
         'B': "-AF+BFB+FA-"
     }
     s = "A"
-    for _ in range(order):
-        new_s = "".join(rules.get(c, c) for c in s)
-        s = new_s
-    return string_to_lines(s, step=step, angle_increment=90)
+
+    partial_lines_per_iteration = []
+    old_lines = []
+
+    for i in range(order):
+        # Expand string once
+        new_s = []
+        for c in s:
+            new_s.append(rules.get(c, c))
+        s = "".join(new_s)
+
+        # Convert the entire string so far into line segments
+        all_lines = string_to_lines(s, step=step, angle_increment=90)
+
+        # Compare sets
+        new_set = set(
+            (round(x1,2), round(y1,2), round(x2,2), round(y2,2))
+            for (x1, y1, x2, y2) in all_lines
+        )
+        old_set = set(
+            (round(x1,2), round(y1,2), round(x2,2), round(y2,2))
+            for (x1, y1, x2, y2) in old_lines
+        )
+
+        diff_set = new_set - old_set
+        diff_lines = []
+        for seg in all_lines:
+            seg_rounded = (
+                round(seg[0],2), round(seg[1],2),
+                round(seg[2],2), round(seg[3],2)
+            )
+            if seg_rounded in diff_set:
+                diff_lines.append(seg)
+
+        partial_lines_per_iteration.append(diff_lines)
+
+        old_lines = all_lines
+
+    return partial_lines_per_iteration
+
 
 def grid_based_sampling(skeleton_pixels, num_points):
     """
@@ -271,6 +348,54 @@ def place_lines_in_image(base_array, lines, start_x, start_y):
                            int(x1 + start_x), int(y1 + start_y), 
                            int(x2 + start_x), int(y2 + start_y))
 
+def draw_line_on_array_color(arr, x1, y1, x2, y2, color):
+    """
+    Bresenham in RGB array. color is (R,G,B).
+    """
+    height, width, _ = arr.shape
+    dx = abs(x2 - x1)
+    sx = 1 if x1 < x2 else -1
+    dy = -abs(y2 - y1)
+    sy = 1 if y1 < y2 else -1
+    err = dx + dy
+    x, y = x1, y1
+
+    while True:
+        if 0 <= x < width and 0 <= y < height:
+            arr[y, x] = color
+        if x == x2 and y == y2:
+            break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+
+def place_lines_in_image_color(base_array, lines, start_x, start_y, color):
+    """
+    Place lines into an RGB array, applying the specified color.
+    """
+    for (lx1, ly1, lx2, ly2) in lines:
+        abs_x1 = int(lx1 + start_x)
+        abs_y1 = int(ly1 + start_y)
+        abs_x2 = int(lx2 + start_x)
+        abs_y2 = int(ly2 + start_y)
+        draw_line_on_array_color(base_array, abs_x1, abs_y1, abs_x2, abs_y2, color)
+
+def save_fractal_lines(fractal_lines, output_filename):
+    """
+    fractal_lines is a list of dicts, each with
+      "start": [x1, y1],
+      "end":   [x2, y2],
+      "color": [r, g, b]
+    """
+    import json
+    with open(output_filename, 'w') as f:
+        json.dump(fractal_lines, f, indent=2)
+    print(f"Fractal lines saved to {output_filename}")
+
 def save_fractal_lines(fractal_lines, output_filename):
     """
     Save fractal lines to a JSON file.
@@ -289,45 +414,135 @@ def load_fractal_lines(input_filename):
         lines = json.load(f)
     return lines
 
+def interpolate_color(c1, c2, t):
+    """
+    Interpolate between color c1 and c2 with factor t in [0,1].
+    c1, c2 are (R,G,B) tuples, t is float in [0,1].
+    """
+    r = int(c1[0] + (c2[0] - c1[0]) * t)
+    g = int(c1[1] + (c2[1] - c1[1]) * t)
+    b = int(c1[2] + (c2[2] - c1[2]) * t)
+    return (r, g, b)
+
+def custom_color_gradient(fraction):
+    """
+    Given a fraction in [0,1], return an (R,G,B) by interpolating
+    across multiple color stops. For example:
+    0.0 --> blue
+    0.4 --> green
+    1.0 --> red
+    
+    The stops are a list of (stop_fraction, (R,G,B)).
+    We linearly interpolate between whichever two stops we are between.
+    """
+    color_stops = [
+        (0.4, (0, 255, 255)),  # fraction=0  --> start color
+        #(0.75, (250, 250, 250)),  # fraction=0.5  --> mid color
+        (1.0, (50, 50, 255)),  # fraction=1.0 --> end color
+    ]
+
+    # If fraction is less than the 1st stop, clamp to first color
+    if fraction <= color_stops[0][0]:
+        return color_stops[0][1]
+    # If fraction is beyond the last stop, clamp to last color
+    if fraction >= color_stops[-1][0]:
+        return color_stops[-1][1]
+
+    # Otherwise find which two stops this fraction is between
+    for i in range(len(color_stops) - 1):
+        f0, c0 = color_stops[i]
+        f1, c1 = color_stops[i+1]
+        if f0 <= fraction <= f1:
+            # Map fraction from [f0,f1] to [0,1]
+            t = (fraction - f0) / (f1 - f0)
+            return interpolate_color(c0, c1, t)
+
+    # Fallback
+    return (255, 255, 255)
+
+def get_gradient_color_from_iteration(iter_index, total_iterations):
+    if total_iterations <= 1:
+        return (255, 255, 255)
+
+    fraction = iter_index / (total_iterations - 1)
+    return custom_color_gradient(fraction)
+
 if __name__ == "__main__":
-    text = "Brandon\n\u2661\nJordyn"
-    frame_dir = "temp_frames/"
-    print(text)
-    # Small font & skeletonize
-    skel = text_to_skeleton_array(text, width=6200, height=5000, font_path='arial unicode ms.otf', font_size=1600)
+    with open("config.json", 'r') as f:
+        config = json.load(f)
+
+    text = config['text']
+    
+    # 1) Skeletonize text (unchanged)
+    skel = text_to_skeleton_array(
+        text, 
+        width=config['img_width'], 
+        height=config['img_height'], 
+        font_path=config['font_path'], 
+        font_size=config['font_size']
+    )
     skeleton_pixels = find_skeleton_pixels(skel)
 
-    # Pick which fractal to use:
-    lines_fractal = dragon_curve(iterations=8, step=12)  # Dragon Curve
-    #lines_fractal = hilbert_curve(order=5, step=3)  # Hilbert Curve
+    # 2) Pick fractal approach, but use *partial* version
+    if config['fractal_type'] == 'dragon':
+        fractal_iterations = dragon_curve_partial(
+            iterations=config['iters'], 
+            step=config['steps']
+        )
+    elif config['fractal_type'] == 'hilbert':
+        fractal_iterations = hilbert_curve_partial(
+            order=config['order'], 
+            step=config['steps']
+        )
+    else:
+        raise ValueError("Unsupported fractal type")
 
-    final_arr = np.copy(skel)
-    all_fractal_lines  = []
+    # Prepare an RGB array
+    final_arr = np.zeros((config['img_height'], config['img_width'], 3), dtype=np.uint8)
+    all_fractal_lines = []
 
-    num_points = 5000
+    # 3) Chosen skeleton anchor points
+    num_points = config['num_src_pts']
     chosen_points = grid_based_sampling(skeleton_pixels, num_points)
 
+    # 4) For each chosen skeleton point, place each iteration's *new lines* in its iteration color
     for idx, (y, x) in enumerate(chosen_points):
-        y, x = int(y), int(x)
         angle = compute_outward_direction(skel, y, x)
-        # Rotate fractal lines by 'angle'
-        rotated_lines = rotate_lines(lines_fractal, angle)
-        # Place fractal at (x, y)
-        place_lines_in_image(final_arr, rotated_lines, start_x=x, start_y=y)
-        # Save the current state as a frame
-        for (x1, y1, x2, y2) in rotated_lines:
-            # Translate to absolute positions
-            abs_x1 = x1 + x
-            abs_y1 = y1 + y
-            abs_x2 = x2 + x
-            abs_y2 = y2 + y
-            all_fractal_lines.append([[abs_x1, abs_y1], [abs_x2, abs_y2]])
-        if (idx+1) % 100 == 0 or (idx+1) == num_points:
-            print(f"Placed {idx+1}/{num_points} fractals.")
 
-    final_img = Image.fromarray((final_arr*255).astype(np.uint8), mode='L')
-    final_img.save("output/thin_text_with_fractals.png", dpi=(400,400))
-    print("Saved thin_text_with_fractals.png")
+        for iter_index, lines_this_iter in enumerate(fractal_iterations):
+            color = get_gradient_color_from_iteration(
+                iter_index,                # iteration index
+                config['iters']    # total iterations
+            )
 
+            # Rotate only the newly-added lines of this iteration
+            rotated_lines = rotate_lines(lines_this_iter, angle)
+
+            # Place fractal lines at (x, y)
+            place_lines_in_image_color(
+                final_arr, 
+                rotated_lines, 
+                start_x=x, 
+                start_y=y, 
+                color=color
+            )
+
+            # Store lines in JSON with color
+            for (lx1, ly1, lx2, ly2) in rotated_lines:
+                all_fractal_lines.append({
+                    "start": [lx1 + x, ly1 + y],
+                    "end":   [lx2 + x, ly2 + y],
+                    "color": list(color)
+                })
+
+        if (idx+1) % 10 == 0 or (idx+1) == num_points:
+            print(f"Placed fractals at {idx+1}/{num_points} skeleton points.")
+
+    # 5) Save the final image
+    final_img = Image.fromarray(final_arr, mode='RGB')
+    final_img.save("output/thin_text_with_fractals_color.png", dpi=(400,400))
+    print("Saved thin_text_with_fractals_color.png")
+
+    # 6) Save lines (with iteration color) to JSON
     fractal_output_file = "output/fractal_lines.json"
     save_fractal_lines(all_fractal_lines, fractal_output_file)
