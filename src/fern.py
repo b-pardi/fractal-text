@@ -1,8 +1,9 @@
-import random
+import numpy as np
 import json
 from PIL import Image
 
-def generate_barnsley_fern(num_points=20000, scale=100):
+
+def generate_barnsley_fern(num_points=20000, scale=100, f2_x_scale=0.85):
     """
     Generates Barnsley fern points.
     Returns a list of (x, y) in floating coords.
@@ -10,6 +11,7 @@ def generate_barnsley_fern(num_points=20000, scale=100):
     'scale' is how large the fractal’s coordinates become if you want
     them in pixel space. Tweak as needed.
     """
+    np.random.seed(42)
     # Barnsley Fern Transform parameters
     # Probability intervals + transform definitions
     # f1
@@ -17,7 +19,7 @@ def generate_barnsley_fern(num_points=20000, scale=100):
     f1 = lambda x, y: (0, 0.16*y)
     # f2
     p2 = 0.85
-    f2 = lambda x, y: (0.85*x + 0.04*y, -0.04*x + 0.85*y + 1.6)
+    f2 = lambda x, y: (f2_x_scale*x + 0.04*y, -0.04*x + 0.85*y + 1.6)
     # f3
     p3 = 0.07
     f3 = lambda x, y: (0.20*x - 0.26*y, 0.23*x + 0.22*y + 1.6)
@@ -29,7 +31,7 @@ def generate_barnsley_fern(num_points=20000, scale=100):
     x, y = 0.0, 0.0  # Starting point
 
     for _ in range(num_points):
-        r = random.random()
+        r = np.random.random()
         if r < p1:
             x, y = f1(x, y)
         elif r < p1 + p2:
@@ -75,27 +77,32 @@ def render_fern_image(points, width=1200, height=1200, bg_color=(0,0,0), fg_colo
 
     return img
 
-if __name__ == "__main__":
-    # 1) Generate points
-    fern_points = generate_barnsley_fern(num_points=10000000, scale=100)
+def barnsley_fern(config):    
+    all_fern_ponts = []
 
-    # rotate horizontally for widescreen display
-    fern_points = [(y,-x) for (x, y) in fern_points]
-    
-    # 2) Render to a high-resolution image
-    out_img = render_fern_image(
-        fern_points,
-        width=3840,
-        height=2160,
-        bg_color=(0, 0, 0),
-        fg_color=(30,255,125)
-    )
-    out_img.save("output/barnsley_fern.png")
-    print("Saved barnsley_fern.png")
+    # shearing x of f2 in 3 different stages to animate a flow between them
+    # shows the fern sort of waving around
+    x_scales = [0.85, 0.68, 0.95]
+    for f2_x in x_scales:
+        # generate points
+        fern_points = generate_barnsley_fern(num_points=200000, scale=100, f2_x_scale=f2_x)
 
-    # 3) Optionally save points to JSON (for Manim)
-    #    We'll store a list of [x, y].
-    with open("output/barnsley_fern_points.json", "w") as f:
-        json.dump(fern_points, f)
-    print("Saved barnsley_fern_points.json (for animation)")
+        # rotate horizontally for widescreen display
+        fern_points = [(y,-x) for (x, y) in fern_points]
+        
+        out_img = render_fern_image(
+            fern_points,
+            width=1280,
+            height=720,
+            bg_color=tuple(config['output_img_bg_color']),
+            fg_color=(30,255,125)
+        )
+        out_img.save(f"output/{config['output_generation_name']}-{f2_x}.png")
+        print("Saved barnsley fern")
+        all_fern_ponts.append(fern_points)
+
+    # save points to JSON for Manim, stored a list of [x, y]
+    with open(f"output/{config['output_generation_name']}.json", "w") as f:
+        json.dump(all_fern_ponts, f)
+    print("Saved barnsley fern points for animation")
 

@@ -1,1 +1,3 @@
 manim animate_fractals.py FractalTextAnimation
+manim animate_fractals.py BarnsleyFernHorizontal
+opt --disable_caching if little to no repetition in animations

@@ -2,13 +2,19 @@ import math, random
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from skimage.morphology import skeletonize
-import imageio
 import json
-import os
 
-def text_to_skeleton_array(text, width=300, height=100, font_path=None, font_size=20):
+from src.enums import FractalType
+
+def text_to_skeleton_array(text, 
+                           width=300, 
+                           height=100, 
+                           font_path=None, 
+                           font_size=20, 
+                           char_spacing=0):
     """
-    Render text and skeletonize it to get a thin line representation.
+    Render text and skeletonize it to get a thin line representation,
+    with adjustable character spacing (char_spacing).
     """
     img = Image.new("L", (width, height), 0)
     draw = ImageDraw.Draw(img)
@@ -20,23 +26,40 @@ def text_to_skeleton_array(text, width=300, height=100, font_path=None, font_siz
     # Split text into lines
     lines = text.split('\n')
 
-    # Measure total height of text block
+    # Measure per-character bounding box for 'A' to estimate line height
     sample_bbox = font.getbbox("A")
     line_height = sample_bbox[3] - sample_bbox[1]
-    total_height = len(lines) * line_height
+    total_height = len(lines) * line_height * 1.52
 
     # Starting y position to center vertically
-    y_offset = (height - total_height*1.54) // 2
+    y_offset = (height - total_height) // 2
 
     for line in lines:
-        # Measure width of each line
-        bbox = draw.textbbox((0, 0), line, font=font)
-        line_width = bbox[2] - bbox[0]
-        # Center each line horizontally
+        # compute how wide this line is, given the custom spacing
+        line_width = 0
+        for char in line:
+            # getbbox() returns (left, top, right, bottom)
+            # char_bbox[2] - char_bbox[0] = character width
+            char_bbox = font.getbbox(char)
+            char_w = char_bbox[2] - char_bbox[0]
+            line_width += char_w + char_spacing
+        line_width -= char_spacing if line else 0
+
+        # center horizontally
         x_offset = (width - line_width) // 2
-        # Draw the line
-        draw.text((x_offset, y_offset*0.8), line, font=font, fill=255)
-        y_offset += line_height*1.54
+
+        # Draw each char
+        x_cursor = x_offset
+        for char in line:
+            char_bbox = font.getbbox(char)
+            char_w = char_bbox[2] - char_bbox[0]
+            draw.text((x_cursor, y_offset), char, font=font, fill=255)
+            
+            # Advance x by char width + spacing
+            x_cursor += char_w + char_spacing
+
+        # Move y down for the next line
+        y_offset += int(line_height*1.2)
 
     # Convert to binary array
     arr = np.array(img)
@@ -47,6 +70,7 @@ def text_to_skeleton_array(text, width=300, height=100, font_path=None, font_siz
     skeleton_arr = skeleton.astype(np.uint8)
 
     return skeleton_arr
+
 
 def find_skeleton_pixels(skel_arr):
     """
@@ -64,6 +88,7 @@ def compute_outward_direction(binary, y, x):
     """
     h, w = binary.shape
     radius = 2
+
     # Identify the line direction by finding nearby skeleton pixels and computing a direction vector
     neighbors = []
     for dy in range(-radius, radius+1):
@@ -78,8 +103,10 @@ def compute_outward_direction(binary, y, x):
     if len(neighbors) > 0:
         avg_dx = np.mean([p[0] for p in neighbors])
         avg_dy = np.mean([p[1] for p in neighbors])
+
         # Line direction angle
         line_angle = math.degrees(math.atan2(-avg_dy, avg_dx))
+
         # Outward direction: pick perpendicular direction
         # We can choose perpendicular by adding 90 degrees or -90 degrees
         # Check which side is more background:
@@ -91,6 +118,7 @@ def compute_outward_direction(binary, y, x):
             rad = math.radians(angle)
             test_x = x + 5*math.cos(rad)
             test_y = y - 5*math.sin(rad)
+
             # count how many bg pixels near test_x,test_y
             count_bg = 0
             for ty in range(-2,3):
@@ -396,15 +424,6 @@ def save_fractal_lines(fractal_lines, output_filename):
         json.dump(fractal_lines, f, indent=2)
     print(f"Fractal lines saved to {output_filename}")
 
-def save_fractal_lines(fractal_lines, output_filename):
-    """
-    Save fractal lines to a JSON file.
-    Each line is represented as a tuple of start and end coordinates.
-    """
-    with open(output_filename, 'w') as f:
-        json.dump(fractal_lines, f)
-    print(f"Fractal lines saved to {output_filename}")
-
 def load_fractal_lines(input_filename):
     """
     Load fractal lines from a JSON file.
@@ -436,9 +455,9 @@ def custom_color_gradient(fraction):
     We linearly interpolate between whichever two stops we are between.
     """
     color_stops = [
-        (0.4, (0, 255, 255)),  # fraction=0  --> start color
+        (0.6, (0, 255, 255)),  # fraction=0  --> start color
         #(0.75, (250, 250, 250)),  # fraction=0.5  --> mid color
-        (1.0, (50, 50, 255)),  # fraction=1.0 --> end color
+        (1.0, (20, 20, 160)),  # fraction=1.0 --> end color
     ]
 
     # If fraction is less than the 1st stop, clamp to first color
@@ -467,58 +486,59 @@ def get_gradient_color_from_iteration(iter_index, total_iterations):
     fraction = iter_index / (total_iterations - 1)
     return custom_color_gradient(fraction)
 
-if __name__ == "__main__":
-    with open("config.json", 'r') as f:
-        config = json.load(f)
-
-    text = config['text']
-    
-    # 1) Skeletonize text (unchanged)
+def fractal_text(text, fractal_type, config):    
+    # Skeletonize text
     skel = text_to_skeleton_array(
         text, 
         width=config['img_width'], 
         height=config['img_height'], 
         font_path=config['font_path'], 
-        font_size=config['font_size']
+        font_size=config['font_size'],
+        char_spacing=config['char_spacing']   # <-- new param
     )
     skeleton_pixels = find_skeleton_pixels(skel)
 
-    # 2) Pick fractal approach, but use *partial* version
-    if config['fractal_type'] == 'dragon':
+    # Pick fractal approach
+    if fractal_type == FractalType.DRAGON:
         fractal_iterations = dragon_curve_partial(
             iterations=config['iters'], 
             step=config['steps']
         )
-    elif config['fractal_type'] == 'hilbert':
+    elif fractal_type == FractalType.HILBERT:
         fractal_iterations = hilbert_curve_partial(
-            order=config['order'], 
+            order=config['iters'], 
             step=config['steps']
         )
     else:
         raise ValueError("Unsupported fractal type")
 
-    # Prepare an RGB array
-    final_arr = np.zeros((config['img_height'], config['img_width'], 3), dtype=np.uint8)
-    all_fractal_lines = []
+    final_arr = np.full((config['img_height'], config['img_width'], 3), config['output_img_bg_color'], dtype=np.uint8)
 
-    # 3) Chosen skeleton anchor points
+    # all_fractals_data[fractal_idx][iteration_idx] = list of line dicts
+    all_fractals_data = []
+
+    # Sample skeleton src points
     num_points = config['num_src_pts']
     chosen_points = grid_based_sampling(skeleton_pixels, num_points)
 
-    # 4) For each chosen skeleton point, place each iteration's *new lines* in its iteration color
+    # For each src point, we place partial expansions
     for idx, (y, x) in enumerate(chosen_points):
         angle = compute_outward_direction(skel, y, x)
 
+        # store iteration-based line dicts for this fractal
+        fractal_iteration_data = []
+
         for iter_index, lines_this_iter in enumerate(fractal_iterations):
+            # olor for this iteration
             color = get_gradient_color_from_iteration(
-                iter_index,                # iteration index
-                config['iters']    # total iterations
+                iter_index,
+                config['iters']
             )
 
-            # Rotate only the newly-added lines of this iteration
+            # rotate lines so they branch outward perpendicular to the text at the src point
             rotated_lines = rotate_lines(lines_this_iter, angle)
 
-            # Place fractal lines at (x, y)
+            # draw them onto final_arr
             place_lines_in_image_color(
                 final_arr, 
                 rotated_lines, 
@@ -527,22 +547,30 @@ if __name__ == "__main__":
                 color=color
             )
 
-            # Store lines in JSON with color
+            # build a list of line dicts for this iteration
+            iteration_line_dicts = []
             for (lx1, ly1, lx2, ly2) in rotated_lines:
-                all_fractal_lines.append({
+                line_dict = {
                     "start": [lx1 + x, ly1 + y],
                     "end":   [lx2 + x, ly2 + y],
                     "color": list(color)
-                })
+                }
+                iteration_line_dicts.append(line_dict)
+
+            # Add this iteration's lines to fractal_iteration_data
+            fractal_iteration_data.append(iteration_line_dicts)
+
+        # Add the entire fractal (all iterations) to the master list
+        all_fractals_data.append(fractal_iteration_data)
 
         if (idx+1) % 10 == 0 or (idx+1) == num_points:
             print(f"Placed fractals at {idx+1}/{num_points} skeleton points.")
 
-    # 5) Save the final image
+    # Save the final color image
     final_img = Image.fromarray(final_arr, mode='RGB')
-    final_img.save("output/thin_text_with_fractals_color.png", dpi=(400,400))
-    print("Saved thin_text_with_fractals_color.png")
+    final_img.save(f"output/{config['output_generation_name']}.png", dpi=tuple(config['output_img_dpi']))
+    print("Saved fractal image")
 
-    # 6) Save lines (with iteration color) to JSON
-    fractal_output_file = "output/fractal_lines.json"
-    save_fractal_lines(all_fractal_lines, fractal_output_file)
+    # Save the nested fractals JSON
+    fractal_output_file = f"output/{config['output_generation_name']}.json"
+    save_fractal_lines(all_fractals_data, fractal_output_file)
